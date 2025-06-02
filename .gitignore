@@ -1,0 +1,9 @@
+/out/
+/node_modules/
+.vscode-test/
+/project_switcher.db
+*.sqlite3
+*.db
+.env
+*.log
+.DS_Store

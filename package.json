@@ -1,0 +1,67 @@
+{
+    "name": "vscode-project-switcher",
+    "displayName": "Project Switcher",
+    "description": "Facilite a troca e gestão de projetos por categoria no VS Code.",
+    "version": "0.1.0",
+    "publisher": "Yves Marinho",
+    "repository": "https://github.com/microsoft/vscode-extension-samples/helloworld-sample",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onCommand:projectSwitcher.openProjectMenu",
+        "onCommand:projectSwitcher.addCategory",
+        "onCommand:projectSwitcher.addProject",
+        "onCommand:projectSwitcher.editProject",
+        "onCommand:projectSwitcher.deleteProject",
+        "onCommand:projectSwitcher.deleteCategory"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "projectSwitcher.openProjectMenu",
+                "title": "Project Switcher: Abrir Menu de Projetos"
+            },
+            {
+                "command": "projectSwitcher.addCategory",
+                "title": "Project Switcher: Adicionar Categoria"
+            },
+            {
+                "command": "projectSwitcher.addProject",
+                "title": "Project Switcher: Adicionar Projeto"
+            },
+            {
+                "command": "projectSwitcher.editProject",
+                "title": "Project Switcher: Editar Projeto"
+            },
+            {
+                "command": "projectSwitcher.deleteProject",
+                "title": "Project Switcher: Remover Projeto"
+            },
+            {
+                "command": "projectSwitcher.deleteCategory",
+                "title": "Project Switcher: Remover Categoria"
+            }
+        ]
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile",
+        "test": "node ./out/test/runTest.js"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/vscode": "^1.80.0",
+        "typescript": "^5.0.0",
+        "vsce": "^3.0.0"
+    },
+    "dependencies": {
+        "better-sqlite3": "^8.0.0"
+    }
+}

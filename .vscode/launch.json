@@ -2,17 +2,22 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "pwa-extensionHost",
+            "type": "extensionHost",
             "request": "launch",
-            "name": "Run Extension",
-            "runtimeExecutable": "${execPath}",
+            "name": "Run Extension with NVM Node",
+            "runtimeExecutable": "/home/yves_marinho/.nvm/versions/node/$(node -v | sed 's/v//')/bin/node",
             "args": [
+                "--inspect-brk=0",
                 "--extensionDevelopmentPath=${workspaceFolder}"
             ],
             "outFiles": [
                 "${workspaceFolder}/out/**/*.js"
             ],
-            "preLaunchTask": "npm: compile"
+            "preLaunchTask": "npm: compile",
+            "env": {
+                "NVM_DIR": "/home/yves_marinho/.nvm",
+                "PATH": "/home/yves_marinho/.nvm/versions/node/$(node -v | sed 's/v//')/bin:${env:PATH}"
+            }
         }
     ]
 }

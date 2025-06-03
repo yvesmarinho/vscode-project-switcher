@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { DatabaseManager } from './databaseManager';
 
 /**
@@ -31,10 +33,11 @@ export class ProjectQuickPickProvider {
 
             const categoriesMap = new Map<string, Array<any>>();
             for (const proj of projects) {
-                if (!categoriesMap.has(proj.category_name)) {
-                    categoriesMap.set(proj.category_name, []);
+                const categoryKey = proj.category_name ?? "Sem Categoria";
+                if (!categoriesMap.has(categoryKey)) {
+                    categoriesMap.set(categoryKey, []);
                 }
-                categoriesMap.get(proj.category_name)!.push(proj);
+                categoriesMap.get(categoryKey)!.push(proj);
             }
 
             const categoryItems = Array.from(categoriesMap.keys()).map(c => ({
@@ -163,7 +166,18 @@ export class ProjectQuickPickProvider {
             if (result === false) {
                 return false;
             }
-            vscode.window.showInformationMessage('Projeto adicionado com sucesso!');
+
+            // Criação automática do arquivo .code-workspace
+            const workspaceFile = path.join(projectPath.trim(), `${name.trim()}.code-workspace`);
+            if (!fs.existsSync(workspaceFile)) {
+                const defaultData = {
+                    folders: [{ path: '.' }],
+                    settings: {}
+                };
+                fs.writeFileSync(workspaceFile, JSON.stringify(defaultData, null, 2), 'utf-8');
+            }
+
+            vscode.window.showInformationMessage('Projeto e workspace criados com sucesso!');
         } catch (error) {
             vscode.window.showErrorMessage(`Erro ao adicionar projeto: ${(error as Error).message}`);
             return false;
@@ -208,11 +222,7 @@ export class ProjectQuickPickProvider {
             }
             const usesVirtualEnv = await vscode.window.showQuickPick(
                 ['Sim', 'Não'],
-                { placeHolder: 'Utiliza virtual env?', 
-                  canPickMany: false,
-                  // Default
-                  onDidSelectItem: (item) => item.label === (project.uses_virtual_env ? 'Sim' : 'Não')
-                }
+                { placeHolder: 'Utiliza virtual env?'}
             );
             let envManager = project.virtual_env_manager;
             if (usesVirtualEnv === 'Sim') {
@@ -227,9 +237,7 @@ export class ProjectQuickPickProvider {
             }
             const categoryPick = await vscode.window.showQuickPick(
                 categories.map(c => ({ label: c.name, id: c.id })),
-                { placeHolder: 'Selecione a categoria', 
-                  canPickMany: false 
-                }
+                { placeHolder: 'Selecione a categoria' }
             );
             if (!categoryPick) {
                 return false;
@@ -278,6 +286,7 @@ export class ProjectQuickPickProvider {
                 ['Sim', 'Não'],
                 { placeHolder: `Deseja remover o projeto "${projectPick.label}"?` }
             );
+            // ERRO ERA AQUI: confirm.label não existe porque confirm é string
             if (confirm !== 'Sim') {
                 return false;
             }
@@ -313,6 +322,7 @@ export class ProjectQuickPickProvider {
                 ['Sim', 'Não'],
                 { placeHolder: `Deseja remover a categoria "${categoryPick.label}"? (irá remover todos os projetos associados)` }
             );
+            // ERRO ERA AQUI: confirm.label não existe porque confirm é string
             if (confirm !== 'Sim') {
                 return false;
             }
@@ -323,6 +333,43 @@ export class ProjectQuickPickProvider {
             vscode.window.showInformationMessage('Categoria removida com sucesso!');
         } catch (error) {
             vscode.window.showErrorMessage(`Erro ao remover categoria: ${(error as Error).message}`);
+            return false;
+        }
+    }
+
+    /**
+     * Edita uma categoria existente.
+     */
+    public async editCategory(): Promise<void | false> {
+        try {
+            const categories = this.dbManager.getCategories();
+            if (!categories || !Array.isArray(categories) || categories.length === 0) {
+                vscode.window.showErrorMessage('Nenhuma categoria cadastrada.');
+                return false;
+            }
+            const categoryPick = await vscode.window.showQuickPick(
+                categories.map(c => ({ label: c.name, id: c.id })),
+                { placeHolder: 'Selecione a categoria para editar' }
+            );
+            if (!categoryPick) {
+                return false;
+            }
+            const newName = await vscode.window.showInputBox({
+                prompt: 'Novo nome da categoria',
+                value: categoryPick.label,
+                validateInput: (text) => (!text || text.trim().length === 0) ? 'Nome obrigatório' : null
+            });
+            if (!newName) {
+                return false;
+            }
+            const result = this.dbManager.editCategory(categoryPick.id, newName.trim());
+            if (result === false) {
+                vscode.window.showErrorMessage('Não foi possível renomear a categoria. Nome já existe ou inválido.');
+                return false;
+            }
+            vscode.window.showInformationMessage('Categoria editada com sucesso!');
+        } catch (error) {
+            vscode.window.showErrorMessage(`Erro ao editar categoria: ${(error as Error).message}`);
             return false;
         }
     }

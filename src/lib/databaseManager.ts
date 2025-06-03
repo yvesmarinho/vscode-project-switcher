@@ -1,251 +1,304 @@
-import * as path from 'path';
 import * as fs from 'fs';
-import * as vscode from 'vscode';
-import Database from 'better-sqlite3';
+import * as path from 'path';
 
 /**
- * Classe responsável por gerenciar o banco de dados SQLite para categorias e projetos.
- * 
+ * Classe de gerenciamento de banco de dados baseado em arquivo JSON para projetos e categorias.
+ *
  * :class:`DatabaseManager`
- * 
- * Exemplos:
- * 
+ *
+ * Exemplo de uso:
+ *
  * .. code-block:: typescript
- * 
- *      const dbManager = new DatabaseManager(context);
- *      const projects = dbManager.getProjects();
- * 
+ *
+ *    >>> const db = new DatabaseManager('meuarquivo.json');
+ *    >>> db.addCategory('Backend');
+ *    >>> db.addProject({name: 'MeuProjeto', language: 'TypeScript', path: '/meu/caminho', category_id: 1});
+ *    >>> db.getProjects();
+ *    [ { ... } ]
  */
 export class DatabaseManager {
     private dbPath: string;
-    private db!: Database.Database;
+    private data: DatabaseJson;
 
     /**
-     * Cria uma instância do DatabaseManager.
-     * 
-     * :param context: Contexto da extensão VS Code.
+     * Inicializa o gerenciador de banco de dados com o caminho para o arquivo JSON.
+     *
+     * :param dbPath: Caminho para o arquivo do banco de dados JSON.
+     * :type dbPath: string
+     * :raises Error: Se dbPath for inválido ou não for possível abrir o arquivo.
+     * :returns: None em sucesso, False em erro.
+     * :rtype: None | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> !!db
+     *   true
      */
-    constructor(context: vscode.ExtensionContext) {
-        try {
-            if (!context || typeof context !== 'object') {
-                throw new Error('Contexto inválido para DatabaseManager');
-            }
-            this.dbPath = path.join(context.globalStorageUri.fsPath, 'project_switcher.db');
-            this.ensureDb();
-        } catch (error) {
-            vscode.window.showErrorMessage(`Erro ao inicializar o banco de dados: ${(error as Error).message}`);
-            return;
+    constructor(dbPath: string) {
+        this.dbPath = dbPath;
+        // Garante que o diretório existe antes de tentar ler/gravar
+        const dir = path.dirname(dbPath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        this.data = this._load();
+        // Garante que a categoria 'Unamed' exista
+        if (!this.data.categories.some(c => c.name === 'Unamed')) {
+            this.data.lastCategoryId++;
+            this.data.categories.push({ id: this.data.lastCategoryId, name: 'Unamed' });
+            this._save();
         }
     }
 
-    /**
-     * Garante a existência do banco de dados e de suas tabelas.
-     */
-    private ensureDb(): void {
-        try {
-            if (!fs.existsSync(path.dirname(this.dbPath))) {
-                fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
+    private _load(): DatabaseJson {
+        if (fs.existsSync(this.dbPath)) {
+            try {
+                const raw = fs.readFileSync(this.dbPath, 'utf-8');
+                return JSON.parse(raw);
+            } catch (e) {
+                // Se corrompido, reinicia
+                return { categories: [], projects: [], lastCategoryId: 0, lastProjectId: 0 };
             }
-            this.db = new Database(this.dbPath);
-            this.db.pragma('journal_mode = WAL');
-
-            this.db.exec(`
-                CREATE TABLE IF NOT EXISTS category (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL UNIQUE
-                );
-                CREATE TABLE IF NOT EXISTS project (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    language TEXT NOT NULL,
-                    path TEXT NOT NULL,
-                    uses_virtual_env BOOLEAN NOT NULL DEFAULT 0,
-                    virtual_env_manager TEXT,
-                    category_id INTEGER NOT NULL,
-                    FOREIGN KEY (category_id) REFERENCES category(id) ON DELETE CASCADE
-                );
-            `);
-        } catch (error) {
-            vscode.window.showErrorMessage(`Erro ao criar banco de dados: ${(error as Error).message}`);
-            return;
+        } else {
+            return { categories: [], projects: [], lastCategoryId: 0, lastProjectId: 0 };
         }
     }
 
+    private _save() {
+        fs.writeFileSync(this.dbPath, JSON.stringify(this.data, null, 2), 'utf-8');
+    }
+
     /**
-     * Adiciona uma categoria.
-     * 
+     * Adiciona uma nova categoria.
+     *
      * :param name: Nome da categoria.
-     * :returns: ID da categoria inserida ou False em caso de erro.
+     * :type name: string
+     * :returns: True em sucesso, False em erro.
+     * :rtype: boolean | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.addCategory('Frontend');
+     *   true
      */
-    public addCategory(name: string): number | false {
-        try {
-            if (!name || typeof name !== 'string') {
-                throw new Error('Nome da categoria inválido.');
-            }
-            const stmt = this.db.prepare('INSERT INTO category (name) VALUES (?)');
-            const info = stmt.run(name);
-            return info.lastInsertRowid as number;
-        } catch (error) {
-            vscode.window.showErrorMessage(`Erro ao adicionar categoria: ${(error as Error).message}`);
-            return false;
-        }
+    public addCategory(name: string): boolean {
+        if (!name || typeof name !== 'string') return false;
+        if (this.data.categories.some(c => c.name === name.trim())) return false;
+        this.data.lastCategoryId++;
+        this.data.categories.push({ id: this.data.lastCategoryId, name: name.trim() });
+        this._save();
+        return true;
     }
 
     /**
      * Retorna todas as categorias.
-     * 
-     * :returns: Array de categorias {id, name} ou False em caso de erro.
+     *
+     * :returns: Array de categorias ou False em erro.
+     * :rtype: any[] | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.getCategories();
+     *   [ { id: 1, name: "Frontend" } ]
      */
-    public getCategories(): Array<{ id: number, name: string }> | false {
-        try {
-            const stmt = this.db.prepare('SELECT id, name FROM category ORDER BY name');
-            return stmt.all();
-        } catch (error) {
-            vscode.window.showErrorMessage(`Erro ao buscar categorias: ${(error as Error).message}`);
-            return false;
-        }
+    public getCategories(): Category[] {
+        return this.data.categories;
     }
 
     /**
-     * Remove uma categoria.
-     * 
+     * Remove uma categoria pelo id.
+     *
      * :param id: ID da categoria.
-     * :returns: True se removido, False caso contrário.
+     * :type id: number
+     * :returns: True em sucesso, False em erro.
+     * :rtype: boolean | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.deleteCategory(1);
+     *   true
      */
     public deleteCategory(id: number): boolean {
-        try {
-            if (typeof id !== 'number' || isNaN(id)) {
-                throw new Error('ID da categoria inválido.');
-            }
-            const stmt = this.db.prepare('DELETE FROM category WHERE id = ?');
-            stmt.run(id);
-            return true;
-        } catch (error) {
-            vscode.window.showErrorMessage(`Erro ao remover categoria: ${(error as Error).message}`);
-            return false;
-        }
+        const before = this.data.categories.length;
+        this.data.categories = this.data.categories.filter(c => c.id !== id);
+        this.data.projects = this.data.projects.filter(p => p.category_id !== id);
+        const after = this.data.categories.length;
+        this._save();
+        return before !== after;
     }
 
     /**
-     * Adiciona um projeto.
-     * 
-     * :param project: Dados do projeto.
-     * :returns: ID do projeto inserido ou False.
+     * Adiciona um novo projeto.
+     *
+     * :param project: Objeto contendo os dados do projeto.
+     * :type project: { name: string, language?: string, path: string, uses_virtual_env?: boolean, virtual_env_manager?: string, category_id?: number }
+     * :returns: True em sucesso, False em erro.
+     * :rtype: boolean | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.addProject({ name: 'MeuProjeto', path: '/caminho', category_id: 1 });
+     *   true
      */
-    public addProject(project: {
-        name: string,
-        language: string,
-        path: string,
-        uses_virtual_env: boolean,
-        virtual_env_manager?: string,
-        category_id: number,
-    }): number | false {
-        try {
-            if (
-                !project ||
-                typeof project !== 'object' ||
-                !project.name ||
-                !project.language ||
-                !project.path ||
-                typeof project.uses_virtual_env !== 'boolean' ||
-                typeof project.category_id !== 'number'
-            ) {
-                throw new Error('Dados do projeto inválidos.');
-            }
-            const stmt = this.db.prepare(
-                `INSERT INTO project 
-                    (name, language, path, uses_virtual_env, virtual_env_manager, category_id)
-                 VALUES (?, ?, ?, ?, ?, ?)`
-            );
-            const info = stmt.run(
-                project.name,
-                project.language,
-                project.path,
-                project.uses_virtual_env ? 1 : 0,
-                project.virtual_env_manager || null,
-                project.category_id
-            );
-            return info.lastInsertRowid as number;
-        } catch (error) {
-            vscode.window.showErrorMessage(`Erro ao adicionar projeto: ${(error as Error).message}`);
-            return false;
+    public addProject(project: Omit<Project, 'id'>): boolean {
+        // Se não houver categoria definida, usa 'Unamed'
+        let categoryId = project.category_id;
+        if (!categoryId) {
+            const unamed = this.data.categories.find(c => c.name === 'Unamed');
+            if (unamed) categoryId = unamed.id;
         }
+        if (!project.name || !project.path) return false;
+        this.data.lastProjectId++;
+        this.data.projects.push({ ...project, id: this.data.lastProjectId, category_id: categoryId });
+        this._save();
+        return true;
     }
 
     /**
-     * Retorna todos projetos, agrupados por categoria.
-     * 
-     * :returns: Array de projetos com categoria ou False.
+     * Retorna todos os projetos, incluindo nome da categoria.
+     *
+     * :returns: Array de projetos ou False em erro.
+     * :rtype: any[] | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.getProjects();
+     *   [ { id: 1, name: "MeuProjeto", category_name: "Frontend", ... } ]
      */
-    public getProjects(): Array<any> | false {
-        try {
-            const stmt = this.db.prepare(`
-                SELECT p.*, c.name as category_name FROM project p
-                JOIN category c ON p.category_id = c.id
-                ORDER BY c.name, p.name
-            `);
-            return stmt.all();
-        } catch (error) {
-            vscode.window.showErrorMessage(`Erro ao buscar projetos: ${(error as Error).message}`);
-            return false;
-        }
+    public getProjects(): (Project & { category_name?: string })[] {
+        return this.data.projects.map(p => ({
+            ...p,
+            category_name: this.data.categories.find(c => c.id === p.category_id)?.name
+        }));
     }
 
     /**
-     * Edita um projeto existente.
-     * 
+     * Retorna um projeto por ID.
+     *
      * :param id: ID do projeto.
-     * :param data: Dados a atualizar.
-     * :returns: True se atualizado, False caso contrário.
+     * :type id: number
+     * :returns: Projeto encontrado ou False em erro.
+     * :rtype: any | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.getProject(1);
+     *   { id: 1, name: "MeuProjeto", ... }
      */
-    public updateProject(id: number, data: Partial<{
-        name: string,
-        language: string,
-        path: string,
-        uses_virtual_env: boolean,
-        virtual_env_manager?: string,
-        category_id: number,
-    }>): boolean {
-        try {
-            if (typeof id !== 'number' || isNaN(id)) {
-                throw new Error('ID inválido.');
-            }
-            const fields = [];
-            const values = [];
-            for (const [key, value] of Object.entries(data)) {
-                fields.push(`${key} = ?`);
-                values.push(value);
-            }
-            if (fields.length === 0) {
-                throw new Error('Nenhum dado para atualizar.');
-            }
-            values.push(id);
-            const stmt = this.db.prepare(`UPDATE project SET ${fields.join(', ')} WHERE id = ?`);
-            stmt.run(...values);
-            return true;
-        } catch (error) {
-            vscode.window.showErrorMessage(`Erro ao atualizar projeto: ${(error as Error).message}`);
-            return false;
-        }
+    public getProject(id: number): Project | undefined {
+        return this.data.projects.find(p => p.id === id);
     }
 
     /**
-     * Remove um projeto.
-     * 
+     * Atualiza um projeto pelo ID.
+     *
      * :param id: ID do projeto.
-     * :returns: True se removido, False caso contrário.
+     * :type id: number
+     * :param project: Objeto com campos a atualizar.
+     * :type project: { name?: string, language?: string, path?: string, uses_virtual_env?: boolean, virtual_env_manager?: string, category_id?: number }
+     * :returns: True em sucesso, False em erro.
+     * :rtype: boolean | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.updateProject(1, { name: 'NovoNome' });
+     *   true
+     */
+    public updateProject(id: number, project: Partial<Omit<Project, 'id'>>): boolean {
+        const idx = this.data.projects.findIndex(p => p.id === id);
+        if (idx === -1) return false;
+        this.data.projects[idx] = { ...this.data.projects[idx], ...project };
+        this._save();
+        return true;
+    }
+
+    /**
+     * Remove um projeto pelo id.
+     *
+     * :param id: ID do projeto.
+     * :type id: number
+     * :returns: True em sucesso, False em erro.
+     * :rtype: boolean | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.deleteProject(1);
+     *   true
      */
     public deleteProject(id: number): boolean {
-        try {
-            if (typeof id !== 'number' || isNaN(id)) {
-                throw new Error('ID do projeto inválido.');
-            }
-            const stmt = this.db.prepare('DELETE FROM project WHERE id = ?');
-            stmt.run(id);
-            return true;
-        } catch (error) {
-            vscode.window.showErrorMessage(`Erro ao remover projeto: ${(error as Error).message}`);
-            return false;
-        }
+        const before = this.data.projects.length;
+        this.data.projects = this.data.projects.filter(p => p.id !== id);
+        const after = this.data.projects.length;
+        this._save();
+        return before !== after;
     }
+
+    /**
+     * Retorna todos os projetos de uma categoria.
+     *
+     * :param category_id: ID da categoria.
+     * :type category_id: number
+     * :returns: Array de projetos ou False em erro.
+     * :rtype: any[] | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.getProjectsByCategory(1);
+     *   [ { id: 1, ... } ]
+     */
+    public getProjectsByCategory(category_id: number): Project[] {
+        return this.data.projects.filter(p => p.category_id === category_id);
+    }
+
+    /**
+     * Fecha a conexão com o banco de dados.
+     *
+     * :returns: True em caso de sucesso, False em caso de erro.
+     * :rtype: boolean
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.close();
+     *   true
+     */
+    public close(): boolean {
+        // Não é necessário para JSON
+        return true;
+    }
+
+    /**
+     * Edita o nome de uma categoria existente.
+     *
+     * :param id: ID da categoria a ser editada.
+     * :type id: number
+     * :param newName: Novo nome para a categoria.
+     * :type newName: string
+     * :returns: True em sucesso, False em erro.
+     * :rtype: boolean | False
+     * :doctest:
+     *   >>> const db = new DatabaseManager('test.json');
+     *   >>> db.editCategory(1, 'NovoNome');
+     *   true
+     */
+    public editCategory(id: number, newName: string): boolean {
+        if (!newName || typeof newName !== 'string') return false;
+        const idx = this.data.categories.findIndex(c => c.id === id);
+        if (idx === -1) return false;
+        // Não permite nome duplicado
+        if (this.data.categories.some(c => c.name === newName.trim() && c.id !== id)) return false;
+        this.data.categories[idx].name = newName.trim();
+        this._save();
+        return true;
+    }
+}
+
+export interface Category {
+    id: number;
+    name: string;
+}
+
+export interface Project {
+    id: number;
+    name: string;
+    language?: string;
+    path: string;
+    uses_virtual_env?: boolean;
+    virtual_env_manager?: string;
+    category_id?: number;
+}
+
+interface DatabaseJson {
+    categories: Category[];
+    projects: Project[];
+    lastCategoryId: number;
+    lastProjectId: number;
 }
